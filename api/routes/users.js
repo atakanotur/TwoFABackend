@@ -15,7 +15,7 @@ const config = require("../config");
 var router = express.Router();
 const auth = require("../lib/auth")();
 const role_privileges = require("../config/role_privileges");
-const { generateRandombase32 } = require("../lib/RandomBase32");
+const { generateRandomBase32 } = require("../lib/RandomBase32");
 
 router.post("/register", async (req, res) => {
   let body = req.body;
@@ -228,157 +228,6 @@ router.post("/add", async (req, res) => {
   }
 });
 
-router.post("/generateOTP", async (req, res) => {
-  try {
-    let body = req.body;
-    if (!body.user_id)
-      throw new CustomError(
-        Enum.HTTP_CODES.BAD_REQUEST,
-        "Validation Error",
-        "user_id field must be filled"
-      );
-
-    const base32_secret = generateRandombase32();
-
-    let totp = new OTPAuth.TOTP({
-      issuer: "atakan",
-      label: "atakan",
-      algorithm: "SHA1",
-      digits: 6,
-      secret: base32_secret,
-    });
-    let otpauth_url = totp.toString();
-    await Users.updateOne(
-      { _id: body.user_id },
-      { otp_auth_url: otpauth_url, otp_base32: base32_secret }
-    );
-    res.json(Response.successResponse({ base32: base32_secret, otpauth_url }));
-  } catch (error) {
-    let errorResponse = Response.errorResponse(error);
-    res.status(errorResponse.code).json(errorResponse);
-  }
-});
-
-router.post("/verify", async (req, res) => {
-  try {
-    let body = req.body;
-
-    if (!body.user_id)
-      throw new CustomError(
-        Enum.HTTP_CODES.BAD_REQUEST,
-        "Validation Error",
-        "user_id field must be filled"
-      );
-
-    if (!body.token)
-      throw new CustomError(
-        Enum.HTTP_CODES.BAD_REQUEST,
-        "Validation Error",
-        "token field must be filled"
-      );
-
-    let user = await Users.findOne({ _id: body.user_id });
-
-    const totp = new OTPAuth.TOTP({
-      issuer: "atakan",
-      label: "atakan",
-      algorithm: "SHA1",
-      digits: 6,
-      secret: user.otp_base32,
-    });
-
-    let delta = totp.validate({ token: body.token });
-
-    if (delta === null)
-      return res.status(Enum.HTTP_CODES.UNAUTHORIZED).json({ success: false });
-
-    let updatedUser = await Users.updateOne(
-      { _id: user._id },
-      { otp_enabled: true, otp_verified: true }
-    );
-    return res.json(
-      Response.successResponse({
-        otp_verified: true,
-        user: {
-          id: updatedUser.id,
-          name: updatedUser.name,
-          email: updatedUser.email,
-          otp_enabled: updatedUser.otp_enabled,
-        },
-      })
-    );
-  } catch (error) {
-    let errorResponse = Response.errorResponse(error);
-    res.status(errorResponse.code).json(errorResponse);
-  }
-});
-
-router.post("/validate", async (req, res) => {
-  try {
-    let body = req.body;
-    if (!body.user_id)
-      throw new CustomError(
-        Enum.HTTP_CODES.BAD_REQUEST,
-        "Validation Error",
-        "user_id field must be filled"
-      );
-    if (!body.token)
-      throw new CustomError(
-        Enum.HTTP_CODES.BAD_REQUEST,
-        "Validation Error",
-        "token field must be filled"
-      );
-    let user = await Users.findOne({ _id: body.user_id });
-    const totp = new OTPAuth.TOTP({
-      issuer: "atakan",
-      label: "atakan",
-      algorithm: "SHA1",
-      digits: 6,
-      secret: user.otp_base32,
-    });
-    let delta = totp.validate({ token: body.token });
-    if (delta === null)
-      return res.status(Enum.HTTP_CODES.UNAUTHORIZED).json({ success: false });
-
-    let userData = {
-      _id: user._id,
-      first_name: user.first_name,
-      last_name: user.last_name,
-      otp_enabled: user.otp_enabled,
-    };
-    let payload = {
-      id: user._id,
-      exp: parseInt(Date.now() / 1000) * config.JWT.EXPIRE_TIME,
-    };
-    let token = jwt.encode(payload, config.JWT.SECRET);
-    res.json(Response.successResponse({ token, user: userData }));
-  } catch (error) {
-    let errorResponse = Response.errorResponse(error);
-    res.status(errorResponse.code).json(errorResponse);
-  }
-});
-
-router.post("/disableOTP", async (req, res) => {
-  try {
-    let body = req.body;
-    if (!body.user_id)
-      throw new CustomError(
-        Enum.HTTP_CODES.BAD_REQUEST,
-        "Validation Error",
-        "user_id field must be filled"
-      );
-    let user = await Users.findOne({ _id: body.user_id });
-    await Users.updateOne(
-      { _id: user._id },
-      { otp_enabled: false, otp_verified: false }
-    );
-    res.json(Response.successResponse({ success: true }));
-  } catch (error) {
-    let errorResponse = Response.errorResponse(error);
-    res.status(errorResponse.code).json(errorResponse);
-  }
-});
-
 router.all("*", auth.authenticate(), (req, res, next) => {
   next();
 });
@@ -459,6 +308,159 @@ router.post("/delete", auth.checkRoles("user_delete"), async (req, res) => {
 
     await Users.deleteOne({ _id: body._id });
     await UserRoles.deleteMany({ user_id: body._id });
+    res.json(Response.successResponse({ success: true }));
+  } catch (error) {
+    let errorResponse = Response.errorResponse(error);
+    res.status(errorResponse.code).json(errorResponse);
+  }
+});
+
+router.post("/generateOTP", async (req, res) => {
+  try {
+    let body = req.body;
+    if (!body.user_id)
+      throw new CustomError(
+        Enum.HTTP_CODES.BAD_REQUEST,
+        "Validation Error",
+        "user_id field must be filled"
+      );
+
+    const base32_secret = generateRandomBase32();
+
+    let totp = new OTPAuth.TOTP({
+      issuer: "user",
+      label: "userOTP",
+      algorithm: "SHA1",
+      digits: 6,
+      secret: base32_secret,
+    });
+
+    let otpauth_url = totp.toString();
+
+    await Users.updateOne(
+      { _id: body.user_id },
+      { otp_auth_url: otpauth_url, otp_base32: base32_secret }
+    );
+    res.json(Response.successResponse({ base32: base32_secret, otpauth_url }));
+  } catch (error) {
+    let errorResponse = Response.errorResponse(error);
+    res.status(errorResponse.code).json(errorResponse);
+  }
+});
+
+router.post("/verify", async (req, res) => {
+  try {
+    let body = req.body;
+    console.log("verify", body);
+    if (!body.user_id)
+      throw new CustomError(
+        Enum.HTTP_CODES.BAD_REQUEST,
+        "Validation Error",
+        "user_id field must be filled"
+      );
+
+    if (!body.token)
+      throw new CustomError(
+        Enum.HTTP_CODES.BAD_REQUEST,
+        "Validation Error",
+        "token field must be filled"
+      );
+
+    let user = await Users.findOne({ _id: body.user_id });
+
+    const totp = new OTPAuth.TOTP({
+      issuer: "user",
+      label: "userOTP",
+      algorithm: "SHA1",
+      digits: 6,
+      secret: user.otp_base32,
+    });
+
+    let delta = totp.validate({ token: body.token });
+
+    if (delta === null)
+      return res.status(Enum.HTTP_CODES.UNAUTHORIZED).json({ success: false });
+
+    let updatedUser = await Users.updateOne(
+      { _id: user._id },
+      { otp_enabled: true, otp_verified: true }
+    );
+    return res.json(
+      Response.successResponse({
+        otp_verified: true,
+        user: {
+          id: updatedUser.id,
+          name: updatedUser.name,
+          email: updatedUser.email,
+          otp_enabled: updatedUser.otp_enabled,
+        },
+      })
+    );
+  } catch (error) {
+    let errorResponse = Response.errorResponse(error);
+    res.status(errorResponse.code).json(errorResponse);
+  }
+});
+
+router.post("/validate", async (req, res) => {
+  try {
+    let body = req.body;
+    if (!body.user_id)
+      throw new CustomError(
+        Enum.HTTP_CODES.BAD_REQUEST,
+        "Validation Error",
+        "user_id field must be filled"
+      );
+    if (!body.token)
+      throw new CustomError(
+        Enum.HTTP_CODES.BAD_REQUEST,
+        "Validation Error",
+        "token field must be filled"
+      );
+    let user = await Users.findOne({ _id: body.user_id });
+    const totp = new OTPAuth.TOTP({
+      issuer: "user",
+      label: "userOTP",
+      algorithm: "SHA1",
+      digits: 6,
+      secret: user.otp_base32,
+    });
+    let delta = totp.validate({ token: body.token });
+    if (delta === null)
+      return res.status(Enum.HTTP_CODES.UNAUTHORIZED).json({ success: false });
+
+    let userData = {
+      _id: user._id,
+      first_name: user.first_name,
+      last_name: user.last_name,
+      otp_enabled: user.otp_enabled,
+    };
+    let payload = {
+      id: user._id,
+      exp: parseInt(Date.now() / 1000) * config.JWT.EXPIRE_TIME,
+    };
+    let token = jwt.encode(payload, config.JWT.SECRET);
+    res.json(Response.successResponse({ token, user: userData }));
+  } catch (error) {
+    let errorResponse = Response.errorResponse(error);
+    res.status(errorResponse.code).json(errorResponse);
+  }
+});
+
+router.post("/disableOTP", async (req, res) => {
+  try {
+    let body = req.body;
+    if (!body.user_id)
+      throw new CustomError(
+        Enum.HTTP_CODES.BAD_REQUEST,
+        "Validation Error",
+        "user_id field must be filled"
+      );
+    let user = await Users.findOne({ _id: body.user_id });
+    await Users.updateOne(
+      { _id: user._id },
+      { otp_enabled: false, otp_verified: false }
+    );
     res.json(Response.successResponse({ success: true }));
   } catch (error) {
     let errorResponse = Response.errorResponse(error);
